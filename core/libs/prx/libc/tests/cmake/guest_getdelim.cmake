@@ -1,0 +1,10 @@
+add_test_executable(guest_getdelim_tests ${LIBS_INCLUDE_DIR}/tests/GuestGetdelim.cpp)
+target_include_directories(guest_getdelim_tests PRIVATE ${LIBS_INCLUDE_DIR})
+target_link_libraries(guest_getdelim_tests PRIVATE libc)
+configure_windows_unwind(guest_getdelim_tests)
+add_test(NAME guest_getdelim COMMAND guest_getdelim_tests guest_getdelim.tmp)
+set_tests_properties(guest_getdelim PROPERTIES TIMEOUT 20)
+if(WIN32)
+    set_tests_properties(guest_getdelim PROPERTIES ENVIRONMENT_MODIFICATION
+        "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
+endif()

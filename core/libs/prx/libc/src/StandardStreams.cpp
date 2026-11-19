@@ -6,6 +6,7 @@
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <stdexcept>
 #ifdef _WIN32
 #include <fcntl.h>
@@ -80,6 +81,23 @@ const bool standardDescriptorsOpen = [] {
 }();
 #endif
 FileStream input{stdin};
+}
+namespace {
+bool ExpandLineToFit(char** line, std::size_t length, std::size_t* capacity) {
+    constexpr std::size_t limit = static_cast<std::size_t>(std::numeric_limits<std::int64_t>::max()) + 1;
+    if (length > limit) {
+        errno = 84;
+        return false;
+    }
+    if (length <= *capacity) return true;
+    std::size_t rounded = 1;
+    while (rounded < length) rounded <<= 1;
+    auto* const grown = static_cast<char*>(realloc_nid_postfix(*line, rounded));
+    if (grown == nullptr) return false;
+    *line = grown;
+    *capacity = rounded;
+    return true;
+}
 }
 extern "C" {
 
@@ -279,6 +297,48 @@ char* APS5_VABI fgets_nid_postfix(char* buffer, int size, FileStream* stream) {
     else errno = previousError;
     stream->KeepDirectoryReadError(result == nullptr);
     return result;
+}
+std::int64_t APS5_VABI getdelim_nid_postfix(char** line, std::size_t* capacity, int delimiter, FileStream* stream) {
+    if (stream == nullptr) throw std::invalid_argument("getdelim: null stream");
+    if (!stream->IsOpen()) { errno = 9; return -1; }
+    flockfile_nid_postfix(stream);
+
+    struct Unlock {
+        FileStream* stream;
+        ~Unlock() { funlockfile_nid_postfix(stream); }
+    } unlock{stream};
+    stream->Orientation(-1);
+    const auto fail = [stream] {
+        stream->SetError();
+        return std::int64_t{-1};
+    };
+    if (line == nullptr || capacity == nullptr) {
+        errno = 22;
+        return fail();
+    }
+    if (*line == nullptr) *capacity = 0;
+    int value = getc_unlocked_nid_postfix(stream);
+    if (value == EOF) {
+        if (feof_unlocked_nid_postfix(stream) == 0 || !ExpandLineToFit(line, 1, capacity)) return fail();
+        (*line)[0] = '\0';
+        return -1;
+    }
+    std::size_t length = 0;
+    for (;;) {
+        if (!ExpandLineToFit(line, length + 2, capacity)) return fail();
+        (*line)[length++] = static_cast<char>(value);
+        if (static_cast<unsigned char>(value) == static_cast<unsigned char>(delimiter)) break;
+        value = getc_unlocked_nid_postfix(stream);
+        if (value == EOF) {
+            if (feof_unlocked_nid_postfix(stream) == 0) return fail();
+            break;
+        }
+    }
+    (*line)[length] = '\0';
+    return static_cast<std::int64_t>(length);
+}
+std::int64_t APS5_VABI getline_nid_postfix(char** line, std::size_t* capacity, FileStream* stream) {
+    return getdelim_nid_postfix(line, capacity, '\n', stream);
 }
 int APS5_VABI feof_nid_postfix(FileStream* stream) {
     stream->SyncStatus();
